@@ -1,0 +1,622 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tidenblick Nordsee – Tidenkurven der BSH-Pegel</title>
+<meta name="description" content="Tidenkurven, Hoch- und Niedrigwasser sowie Wasserstandsvorhersagen für Pegel an der deutschen Nordseeküste – auf Basis der offenen BSH-Daten.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%230d5a70%22/%3E%3Cpath d=%22M4 18c3 0 3-5 6-5s3 5 6 5 3-5 6-5 3 5 6 5%22 fill=%22none%22 stroke=%22white%22 stroke-width=%222.6%22 stroke-linecap=%22round%22/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://api.fontshare.com">
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M2 18c3.5 0 3.5-6 7-6s3.5 6 7 6 3.5-6 7-6 3.5 6 7 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M2 25c3.5 0 3.5-3 7-3s3.5 3 7 3 3.5-3 7-3 3.5 3 7 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" opacity=".5"/></svg>
+      <div>
+        <div class="brand-name">Tidenblick Nordsee</div>
+        <div class="brand-sub">Gezeiten &amp; Wasserstand · Daten des BSH</div>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <div class="seg" role="radiogroup" aria-label="Bezugshöhe">
+        <button role="radio" data-datum="PNP" aria-checked="true" title="Pegelnull">PNP</button>
+        <button role="radio" data-datum="NHN" aria-checked="false" title="Normalhöhennull">NHN</button>
+        <button role="radio" data-datum="SKN" aria-checked="false" title="Seekartennull">SKN</button>
+      </div>
+      <button class="icon-btn" id="refreshBtn" aria-label="Daten aktualisieren" title="Daten aktualisieren">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="icon-btn" id="themeBtn" aria-label="Hell-/Dunkelmodus umschalten" title="Hell-/Dunkelmodus">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <aside class="sidebar" id="sidebar">
+    <button class="picker-toggle" id="pickerToggle" aria-expanded="false" aria-controls="pickerBody">
+      <span class="picker-label">Bezugsort</span>
+      <span class="picker-current" id="pickerCurrent">–</span>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+    <div class="picker-body" id="pickerBody">
+      <div id="map" class="map" role="region" aria-label="Karte der Pegel"></div>
+      <label class="search">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 20l-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <input id="search" type="search" placeholder="Pegel suchen, z. B. Norderney" autocomplete="off" aria-label="Pegel suchen">
+      </label>
+      <div class="station-list" id="stationList" role="listbox" aria-label="Pegel an der Nordseeküste"></div>
+    </div>
+  </aside>
+
+  <main class="main" id="main">
+    <section class="station-head">
+      <div>
+        <div class="eyebrow" id="stArea">–</div>
+        <h1 id="stName">Pegel wird geladen …</h1>
+        <div class="meta" id="stMeta"></div>
+      </div>
+      <div class="status" id="stStatus"></div>
+    </section>
+
+    <div class="notice" id="forecastText" hidden></div>
+    <div class="notice notice-info" id="infoText" hidden></div>
+    <div class="notice notice-error" id="errorBox" hidden></div>
+
+    <section class="kpis" id="kpis">
+      <div class="kpi"><div class="kpi-label">Aktueller Wasserstand</div><div class="kpi-value skel" id="kpiNow">&nbsp;</div><div class="kpi-sub" id="kpiNowSub">&nbsp;</div></div>
+      <div class="kpi"><div class="kpi-label">Nächstes Hochwasser</div><div class="kpi-value skel" id="kpiHW">&nbsp;</div><div class="kpi-sub" id="kpiHWSub">&nbsp;</div></div>
+      <div class="kpi"><div class="kpi-label">Nächstes Niedrigwasser</div><div class="kpi-value skel" id="kpiNW">&nbsp;</div><div class="kpi-sub" id="kpiNWSub">&nbsp;</div></div>
+      <div class="kpi"><div class="kpi-label">Tidenhub nächste Tide</div><div class="kpi-value skel" id="kpiRange">&nbsp;</div><div class="kpi-sub" id="kpiRangeSub">&nbsp;</div></div>
+    </section>
+
+    <section class="card chart-card">
+      <div class="card-head">
+        <div>
+          <h2>Tidenkurve</h2>
+          <div class="card-sub" id="chartSub">Wasserstand in cm über PNP</div>
+        </div>
+        <div class="seg seg-sm" role="radiogroup" aria-label="Zeitraum">
+          <button role="radio" data-range="1" aria-checked="true">24 Std.</button>
+          <button role="radio" data-range="3" aria-checked="false">3 Tage</button>
+          <button role="radio" data-range="7" aria-checked="false">7 Tage</button>
+        </div>
+      </div>
+      <div class="legend" id="legend"></div>
+      <div class="chart-wrap" id="chartWrap">
+        <svg id="chart" role="img" aria-label="Tidenkurve"></svg>
+        <div class="tooltip" id="tooltip" hidden></div>
+      </div>
+      <div class="chart-note" id="chartNote"></div>
+    </section>
+
+    <section class="card wh-card" id="whCard" aria-labelledby="whTitle">
+      <div class="card-head">
+        <div>
+          <h2 id="whTitle">Wattenhoch-Passage</h2>
+          <div class="card-sub">Wann ist genug Wasser über dem Wattenhoch? Berechnet mit dem gewählten Pegel als Bezugspegel.</div>
+        </div>
+      </div>
+      <form class="wh-form" id="whForm" autocomplete="off" novalidate>
+        <label class="fld fld-full"><span>Bekanntes Wattfahrwasser (setzt Bezugspegel und Zeitversatz)</span>
+          <select id="whPreset"><option value="">Eigene Eingabe</option></select>
+        </label>
+        <div class="wh-preset-info fld-full" id="whPresetInfo" hidden></div>
+        <label class="fld fld-wide"><span>Wattenhoch / Fahrwasser</span>
+          <input id="whName" type="text" maxlength="40" placeholder="z. B. Osterems">
+        </label>
+        <div class="fld fld-wide"><span>Kartenhöhe laut Seekarte (m, bezogen auf SKN)</span>
+          <div class="fld-row">
+            <div class="seg seg-sm" role="radiogroup" aria-label="Art der Kartenangabe">
+              <button type="button" role="radio" data-whmode="dry" aria-checked="true" title="Unterstrichene Zahl in der Seekarte">trockenfallend</button>
+              <button type="button" role="radio" data-whmode="depth" aria-checked="false" title="Kartentiefe unter SKN">Tiefe</button>
+            </div>
+            <input id="whHeight" type="number" inputmode="decimal" step="0.1" min="0" max="10" placeholder="z. B. 0,8" aria-label="Kartenhöhe in Metern">
+          </div>
+        </div>
+        <label class="fld"><span>Tiefgang (m)</span>
+          <input id="whDraft" type="number" inputmode="decimal" step="0.05" min="0" max="6" value="1.2">
+        </label>
+        <label class="fld"><span>Handbreit unterm Kiel (m)</span>
+          <input id="whMargin" type="number" inputmode="decimal" step="0.05" min="0" max="3" value="0.3">
+        </label>
+        <label class="fld"><span>Zeitversatz zum Pegel (Min.)</span>
+          <input id="whOffset" type="number" inputmode="numeric" step="5" min="-180" max="180" value="0" title="Positiv: Hochwasser am Wattenhoch später als am Bezugspegel">
+        </label>
+        <label class="fld fld-check"><input id="whUseFc" type="checkbox" checked><span>Windstau aus der Vorhersage berücksichtigen</span></label>
+      </form>
+      <div class="wh-result" id="whResult" aria-live="polite"></div>
+      <div class="table-wrap wh-table-wrap" id="whTableWrap" hidden>
+        <table class="events wh-table" id="whTable">
+          <thead><tr><th>Tag</th><th>Fenster</th><th class="num">Dauer</th><th class="num">Max. Wassertiefe</th><th>Hinweis</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="wh-disclaimer">Planungshilfe ohne Gewähr. Wattenhöhen ändern sich laufend. Nutze die aktuelle amtliche Seekarte bzw. die Wattfahrwasser-Peilungen, und beachte Seegang, Squat und Abweichungen zwischen Bezugspegel und Wattenhoch. Die Verantwortung liegt bei der Schiffsführung.</p>
+    </section>
+
+    <div class="grid-2">
+      <section class="card">
+        <div class="card-head"><div><h2>Hoch- und Niedrigwasser</h2><div class="card-sub" id="eventsSub">Astronomische Vorausberechnung und Vorhersage</div></div></div>
+        <div class="table-wrap">
+          <table class="events" id="events">
+            <thead><tr><th>Zeit</th><th>Tide</th><th class="num">Vorausber.</th><th class="num">Vorhersage</th><th class="num">Abw. MHW/MNW</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <div class="stack">
+        <section class="card">
+          <div class="card-head"><div><h2>Sonne &amp; Mond</h2><div class="card-sub">Heute am Pegel</div></div></div>
+          <dl class="facts" id="astro"></dl>
+        </section>
+        <section class="card">
+          <div class="card-head"><div><h2>Pegel-Stammdaten</h2><div class="card-sub" id="refSub">Bezugshöhen und Mittelwerte</div></div></div>
+          <dl class="facts" id="facts"></dl>
+          <div class="links" id="links"></div>
+        </section>
+      </div>
+    </div>
+
+    <footer class="footer">
+      <p id="copyright">Datenquelle: Bundesamt für Seeschifffahrt und Hydrographie (BSH), Lizenz CC BY 4.0.</p>
+      <p>Die Angaben dienen der Information. Maßgeblich sind die amtlichen Veröffentlichungen auf <a href="https://wasserstand.bsh.de/" target="_blank" rel="noopener">wasserstand.bsh.de</a> und <a href="https://gezeiten.bsh.de/" target="_blank" rel="noopener">gezeiten.bsh.de</a>. Alle Zeiten in deutscher gesetzlicher Zeit.</p>
+    </footer>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/suncalc@1.9.0/suncalc.js"></script>
+<script src="stations.js"></script>
+<script src="presets.js"></script>
+<script src="app.js"></script>
+<script data-pplx-inline-edit>
+(function () {
+  if (window === window.top) return;
+
+  const allowedParentOrigins = ["https://www.perplexity.ai","https://perplexity.ai","https://testing.perplexity.ai","https://staging.perplexity.ai","https://*.preview.i.perplexity.ai","http://perplexity.localhost","http://localhost:1420","http://127.0.0.1:1420","http://localhost:3000","http://127.0.0.1:3000","http://localhost:5173","http://127.0.0.1:5173"];
+  const MAX_FONT_BYTES = 500 * 1024;
+  const MAX_TOTAL_FONT_BYTES = 2 * 1024 * 1024;
+  const DEFAULT_LINE_HEIGHT = 16;
+  let scrollForwarding = false;
+  let scrollRaf = 0;
+  let trustedTopOrigin = null;
+
+  // Allow entries like "https://*.preview.i.perplexity.ai" — the wildcard
+  // matches a single DNS label (no dots), so "https://*.foo" cannot stretch
+  // across multiple labels.
+  function matchesAllowedOrigin(origin) {
+    if (!origin) return false;
+    for (const entry of allowedParentOrigins) {
+      if (!entry.includes("*")) {
+        if (entry === origin) return true;
+        continue;
+      }
+      const pattern = new RegExp(
+        "^" +
+          entry.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^.]+") +
+          "$",
+      );
+      if (pattern.test(origin)) return true;
+    }
+    return false;
+  }
+
+  // Trust decision: when the sender is same-origin-visible (event.origin is a
+  // real origin like https://www.perplexity.ai) we trust event.origin directly.
+  // When event.origin is "null" (opaque broker srcdoc), we fall back to the
+  // broker's stamped `parentOrigin` to identify the top window. The fallback
+  // is claim-only — we rely on the browser's native `targetOrigin` enforcement
+  // on the response path (see postToTrustedTop) to ensure replies can't be
+  // delivered to anyone but the actual top window of that claimed origin.
+  function getTrustedParentOrigin(event) {
+    const forwardedParentOrigin =
+      typeof event.data.parentOrigin === "string" ? event.data.parentOrigin : null;
+    const parentOrigin = event.origin === "null" ? forwardedParentOrigin : event.origin;
+    return matchesAllowedOrigin(parentOrigin) ? parentOrigin : null;
+  }
+
+  // All responses go to window.top with targetOrigin = the allowlisted origin.
+  // An attacker that iframes us inside their own null-origin broker can claim
+  // any parentOrigin they like, but the browser will drop the reply whenever
+  // the real top's origin doesn't match — so the screenshot never leaves.
+  function postToTrustedTop(message) {
+    if (!trustedTopOrigin) return;
+    try {
+      window.top.postMessage(message, trustedTopOrigin);
+    } catch (_error) {}
+  }
+
+  const PICK_CAPABILITIES = ["pick"];
+  const PICK_CHAIN_LENGTH = 4;
+  const PICK_MAX_TEXT_CHARS = 120;
+  const PICK_MAX_HTML_CHARS = 300;
+
+  function truncate(value, maxChars) {
+    return value.length > maxChars ? value.slice(0, maxChars - 1) + "…" : value;
+  }
+
+  function isPickableElement(element) {
+    return (
+      element instanceof Element &&
+      element !== document.documentElement &&
+      element !== document.body
+    );
+  }
+
+  function resolvePickTarget(x, y) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    const element = document.elementFromPoint(x, y);
+    return isPickableElement(element) ? element.closest("svg") || element : null;
+  }
+
+  function pickLabel(element) {
+    if (element.id) return element.localName + "#" + element.id;
+    return [element.localName].concat(Array.from(element.classList).slice(0, 2)).join(".");
+  }
+
+  // Only attributes that help find the element in source. data-* values and URL
+  // query strings or fragments can carry tokens.
+  const PICK_ATTRIBUTES = new Set([
+    "id",
+    "class",
+    "name",
+    "type",
+    "role",
+    "alt",
+    "aria-label",
+    "href",
+    "src",
+  ]);
+
+  function pickAttributeValue(attribute) {
+    return attribute.name === "href" || attribute.name === "src"
+      ? attribute.value.split(/[?#]/)[0]
+      : attribute.value;
+  }
+
+  function describePickElement(element) {
+    const chain = [];
+    for (
+      let current = element;
+      isPickableElement(current) && chain.length < PICK_CHAIN_LENGTH;
+      current = current.parentElement
+    ) {
+      chain.unshift(current);
+    }
+    const attributes = Array.from(element.attributes)
+      .filter((attribute) => PICK_ATTRIBUTES.has(attribute.name))
+      .map((attribute) => ` ${attribute.name}="${pickAttributeValue(attribute).replace(/"/g, "&quot;")}"`)
+      .join("");
+    const text = (element.innerText || element.textContent || "").replace(/\s+/g, " ").trim();
+    return {
+      chain: chain.map(pickLabel),
+      html: truncate(`<${element.localName}${attributes}>`, PICK_MAX_HTML_CHARS),
+      text: text ? truncate(text, PICK_MAX_TEXT_CHARS) : undefined,
+    };
+  }
+
+  // Hover asks once per frame, and innerText on a large section forces layout,
+  // so only the rect is re-read while the pointer stays on the same element.
+  // Clicks ask for fresh details since the page may have changed the element.
+  let lastPick = null;
+
+  function describePickTarget(element, fresh) {
+    if (fresh || lastPick?.element !== element) {
+      lastPick = { element, details: describePickElement(element) };
+    }
+    const rect = element.getBoundingClientRect();
+    return {
+      rect: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
+      ...lastPick.details,
+    };
+  }
+
+  function inlineAll(original, clone) {
+    if (original.nodeType !== 1 || clone.nodeType !== 1) return;
+
+    try {
+      const computedStyle = getComputedStyle(original);
+      // cssText on a computed style is the serialized declaration in modern
+      // Chromium/Safari — a single read beats enumerating ~400 longhand
+      // properties. Firefox returns "" here, so we fall back on empty.
+      const serialized = computedStyle.cssText;
+      if (serialized) {
+        clone.style.cssText = serialized;
+      } else {
+        const parts = new Array(computedStyle.length);
+        for (let index = 0; index < computedStyle.length; index += 1) {
+          const property = computedStyle[index];
+          parts[index] = `${property}:${computedStyle.getPropertyValue(property)};`;
+        }
+        clone.style.cssText = parts.join("");
+      }
+    } catch (_error) {}
+
+    const originalChildren = original.children;
+    const clonedChildren = clone.children;
+    for (
+      let index = 0;
+      index < originalChildren.length && index < clonedChildren.length;
+      index += 1
+    ) {
+      inlineAll(originalChildren[index], clonedChildren[index]);
+    }
+  }
+
+  function extractFontUrl(srcValue) {
+    const matches = [
+      ...srcValue.matchAll(
+        /url\(["']?([^"')]+)["']?\)(?:\s*format\(["']?([^"')]+)["']?\))?/gi,
+      ),
+    ];
+    if (matches.length === 0) return null;
+    const woff2 = matches.find((m) => m[2] && m[2].toLowerCase().includes("woff2"));
+    if (woff2) return woff2[1];
+    const woff = matches.find((m) => m[2] && m[2].toLowerCase().includes("woff"));
+    if (woff) return woff[1];
+    return matches[0][1];
+  }
+
+  // Cache resolved font URL -> data URI across captures. Fonts on a page
+  // essentially never change, and a batch run emits multiple captures back to
+  // back — without this we'd refetch + re-base64 every time.
+  const fontDataUriCache = new Map();
+  const SRC_DECLARATION_RE = /src\s*:\s*[^;}]+/i;
+
+  async function fetchAsDataUri(url) {
+    if (fontDataUriCache.has(url)) return fontDataUriCache.get(url);
+    let dataUri = null;
+    try {
+      const response = await fetch(url, { mode: "cors", credentials: "omit" });
+      if (response.ok) {
+        const blob = await response.blob();
+        if (blob.size <= MAX_FONT_BYTES) {
+          dataUri = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () =>
+              resolve(typeof reader.result === "string" ? reader.result : null);
+            reader.onerror = () => resolve(null);
+            reader.readAsDataURL(blob);
+          });
+        }
+      }
+    } catch (_error) {
+      dataUri = null;
+    }
+    fontDataUriCache.set(url, dataUri);
+    return dataUri;
+  }
+
+  function collectFontFaceRuleTexts() {
+    const rules = [];
+    for (const sheet of document.styleSheets) {
+      let cssRules;
+      try {
+        cssRules = sheet.cssRules;
+      } catch (_error) {
+        continue;
+      }
+      if (!cssRules) continue;
+      for (const rule of cssRules) {
+        const cssText = rule.cssText || "";
+        if (cssText.startsWith("@font-face")) rules.push(cssText);
+      }
+    }
+    return rules;
+  }
+
+  async function buildInlinedFontCss() {
+    const ruleTexts = collectFontFaceRuleTexts();
+    if (ruleTexts.length === 0) return null;
+
+    const resolved = ruleTexts.map((cssText) => {
+      if (!SRC_DECLARATION_RE.test(cssText)) return null;
+      const srcMatch = cssText.match(/src\s*:\s*([^;}]+)[;}]/i);
+      if (!srcMatch) return null;
+      const url = extractFontUrl(srcMatch[1]);
+      if (!url) return null;
+      try {
+        return { cssText, url: new URL(url, document.baseURI).href };
+      } catch (_error) {
+        return null;
+      }
+    });
+
+    const dataUris = await Promise.all(
+      resolved.map((entry) => (entry ? fetchAsDataUri(entry.url) : Promise.resolve(null))),
+    );
+
+    const inlined = [];
+    let totalBytes = 0;
+    for (let index = 0; index < resolved.length; index += 1) {
+      const entry = resolved[index];
+      const dataUri = dataUris[index];
+      if (!entry || !dataUri) continue;
+      const approxBytes = dataUri.length * 0.75;
+      if (totalBytes + approxBytes > MAX_TOTAL_FONT_BYTES) break;
+      totalBytes += approxBytes;
+      inlined.push(entry.cssText.replace(SRC_DECLARATION_RE, `src: url("${dataUri}")`));
+    }
+    return inlined.length > 0 ? inlined.join("\n") : null;
+  }
+
+  function stripExternal(clone) {
+    const images = clone.querySelectorAll("img");
+    for (let index = 0; index < images.length; index += 1) {
+      const src = images[index].getAttribute("src");
+      if (src && !src.startsWith("data:")) images[index].removeAttribute("src");
+    }
+
+    const elements = clone.querySelectorAll("*");
+    for (let index = 0; index < elements.length; index += 1) {
+      const style = elements[index].style.cssText;
+      if (style && style.includes("url(")) {
+        elements[index].style.cssText = style.replace(
+          /url\(["']?(?!data:)[^)"']*["']?\)/gi,
+          "none",
+        );
+      }
+    }
+  }
+
+  function emitScroll() {
+    scrollRaf = 0;
+    if (!scrollForwarding) return;
+    postToTrustedTop({
+      type: "INLINE_EDIT_SCROLL",
+      scrollX: window.scrollX,
+      scrollY: window.scrollY,
+      capabilities: PICK_CAPABILITIES,
+    });
+  }
+
+  window.addEventListener(
+    "scroll",
+    function () {
+      if (!scrollForwarding || scrollRaf) return;
+      scrollRaf = requestAnimationFrame(emitScroll);
+    },
+    { passive: true, capture: true },
+  );
+
+  async function handleCaptureRequest(event) {
+    const requestId = event.data.requestId;
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+
+    function postResult(dataUrl) {
+      postToTrustedTop({
+        type: "INLINE_EDIT_SCREENSHOT_RESULT",
+        requestId,
+        dataUrl,
+        scrollX,
+        scrollY,
+      });
+    }
+
+    try {
+      // Wait for any pending web fonts to resolve so both inline metrics and
+      // the @font-face inlining below see the same loaded faces.
+      if (document.fonts && document.fonts.ready) {
+        try {
+          await document.fonts.ready;
+        } catch (_error) {}
+      }
+
+      const clone = document.documentElement.cloneNode(true);
+      inlineAll(document.documentElement, clone);
+
+      const removedNodes = clone.querySelectorAll("script,link[rel=\"stylesheet\"],style");
+      for (let index = 0; index < removedNodes.length; index += 1) {
+        removedNodes[index].remove();
+      }
+
+      stripExternal(clone);
+
+      // Re-embed web fonts as data-URI @font-face rules so the SVG rasterizer
+      // can resolve them — external font URLs aren't fetched during
+      // foreignObject rendering, which would otherwise force a fallback face
+      // and change text metrics.
+      const inlinedFontCss = await buildInlinedFontCss();
+      if (inlinedFontCss) {
+        const styleEl = document.createElement("style");
+        styleEl.textContent = inlinedFontCss;
+        const head = clone.querySelector("head");
+        if (head) head.appendChild(styleEl);
+        else clone.insertBefore(styleEl, clone.firstChild);
+      }
+
+      const html = new XMLSerializer().serializeToString(clone);
+      const svg =
+        `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">` +
+        '<foreignObject width="100%" height="100%">' +
+        `<div xmlns="http://www.w3.org/1999/xhtml" style="width:${width}px;height:${height}px;overflow:hidden">` +
+        `<div style="position:relative;left:-${scrollX}px;top:-${scrollY}px">` +
+        html +
+        "</div></div></foreignObject></svg>";
+      const svgUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+      const image = new Image();
+      image.onload = function () {
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d").drawImage(image, 0, 0);
+        postResult(canvas.toDataURL("image/png"));
+      };
+      image.onerror = function () {
+        postResult(null);
+      };
+      image.src = svgUrl;
+    } catch (_error) {
+      postResult(null);
+    }
+  }
+
+  window.addEventListener("message", function (event) {
+    if (!event.data) return;
+    // Only accept messages from the direct parent frame. Blocks sibling /
+    // unrelated-window postMessage senders that could otherwise reach us.
+    if (event.source !== window.parent) return;
+
+    const trustedParentOrigin = getTrustedParentOrigin(event);
+    if (!trustedParentOrigin) return;
+    trustedTopOrigin = trustedParentOrigin;
+
+    if (event.data.type === "INLINE_EDIT_PICK") {
+      const element = resolvePickTarget(event.data.x, event.data.y);
+      postToTrustedTop({
+        type: "INLINE_EDIT_PICK_RESULT",
+        seq: event.data.seq,
+        target: element ? describePickTarget(element, event.data.fresh === true) : null,
+      });
+      return;
+    }
+
+    if (event.data.type === "INLINE_EDIT_SCROLL_START") {
+      scrollForwarding = true;
+      emitScroll();
+      return;
+    }
+
+    if (event.data.type === "INLINE_EDIT_SCROLL_STOP") {
+      scrollForwarding = false;
+      if (scrollRaf) cancelAnimationFrame(scrollRaf);
+      scrollRaf = 0;
+      return;
+    }
+
+    if (event.data.type === "INLINE_EDIT_SCROLL_BY") {
+      const { deltaX, deltaY, deltaMode } = event.data;
+      if (!scrollForwarding || !Number.isFinite(deltaX) || !Number.isFinite(deltaY)) return;
+      if (deltaMode !== 0 && deltaMode !== 1 && deltaMode !== 2) return;
+      const lineHeight =
+        parseFloat(getComputedStyle(document.documentElement).lineHeight) || DEFAULT_LINE_HEIGHT;
+      const scaleX = deltaMode === 1 ? lineHeight : deltaMode === 2 ? window.innerWidth : 1;
+      const scaleY = deltaMode === 1 ? lineHeight : deltaMode === 2 ? window.innerHeight : 1;
+      // The selection overlay receives the wheel event instead of this iframe.
+      // Instant scrolling preserves trackpad deltas even on smooth-scroll sites.
+      window.scrollBy({ left: deltaX * scaleX, top: deltaY * scaleY, behavior: "instant" });
+      emitScroll();
+      return;
+    }
+
+    if (event.data.type !== "INLINE_EDIT_CAPTURE_REQUEST") return;
+
+    handleCaptureRequest(event);
+  });
+})();
+
+
+</script></body>
+</html>
