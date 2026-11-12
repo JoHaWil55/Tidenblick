@@ -217,6 +217,16 @@
     $('pickerToggle').setAttribute('aria-expanded', String(open));
     if (open && map) setTimeout(() => map.invalidateSize(), 50);
   });
+  document.querySelectorAll('.quicknav button').forEach((b) => b.addEventListener('click', () => {
+    const el = document.getElementById(b.dataset.target);
+    if (!el) return;
+    if (el.id === 'sidebar' && !$('pickerBody').classList.contains('open')) {
+      $('pickerBody').classList.add('open');
+      $('pickerToggle').setAttribute('aria-expanded', 'true');
+      if (map) setTimeout(() => map.invalidateSize(), 50);
+    }
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }));
 
   function selectStation(id, opts = {}) {
     if (!byId[id]) return;
