@@ -6,6 +6,10 @@
 <title>Tidenblick Nordsee – Tidenkurven der BSH-Pegel</title>
 <meta name="description" content="Tidenkurven, Hoch- und Niedrigwasser sowie Wasserstandsvorhersagen für Pegel an der deutschen Nordseeküste – auf Basis der offenen BSH-Daten.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%230d5a70%22/%3E%3Cpath d=%22M4 18c3 0 3-5 6-5s3 5 6 5 3-5 6-5 3 5 6 5%22 fill=%22none%22 stroke=%22white%22 stroke-width=%222.6%22 stroke-linecap=%22round%22/%3E%3C/svg%3E">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="theme-color" content="#0d5a70" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0a1319" media="(prefers-color-scheme: dark)">
 <link rel="stylesheet" href="fonts.css">
 <link rel="stylesheet" href="vendor/leaflet.css">
 <link rel="stylesheet" href="styles.css">
@@ -174,6 +178,7 @@
   </main>
 </div>
 
+<script>if ('serviceWorker' in navigator) { window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js'); }); }</script>
 <script src="vendor/d3.min.js"></script>
 <script src="vendor/leaflet.js"></script>
 <script src="vendor/suncalc.js"></script>
