@@ -239,8 +239,8 @@ table.events { width: 100%; border-collapse: collapse; font-size: var(--text-sm)
   .grid-2 { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 860px) {
-  .app { grid-template-columns: minmax(0, 1fr); }
-  .topbar { padding: 10px 16px; position: static; }
+  .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto; }
+  .topbar { padding: 10px 16px; position: static; flex-wrap: wrap; row-gap: 8px; }
   .brand-sub { display: none; }
   .sidebar { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); top: auto; }
   .picker-toggle {
