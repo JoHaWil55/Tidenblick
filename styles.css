@@ -116,8 +116,30 @@ a { color: var(--primary); text-underline-offset: 2px; }
   font-size: var(--text-sm);
 }
 .st-item:hover { background: var(--surface-2); }
+.st-item:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 .st-item[aria-selected="true"] { background: var(--primary-soft); color: var(--primary); font-weight: 700; }
+.st-item .st-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-right { display: inline-flex; align-items: center; gap: 4px; flex: none; }
 .st-tag { font-size: 11px; color: var(--faint); white-space: nowrap; font-weight: 500; }
+.st-fav {
+  width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px; color: var(--faint); font-size: 15px; line-height: 1; cursor: pointer;
+}
+.st-fav:hover { background: var(--surface-2); color: var(--accent); }
+.st-fav.active { color: #d99a1b; }
+.geo-btn {
+  display: flex; align-items: center; gap: 8px; margin: 0 16px 8px; padding: 8px 12px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text);
+  font: inherit; font-size: var(--text-sm); cursor: pointer;
+}
+.geo-btn:hover { border-color: var(--primary); color: var(--primary); }
+.geo-btn svg { width: 16px; height: 16px; flex: none; }
+.geo-btn.spinning svg { animation: spin .8s linear infinite; }
+.geo-hint { margin: 0 16px 4px; font-size: var(--text-xs); color: var(--muted); min-height: 1em; }
+.noscript-box {
+  margin: 16px; padding: 12px 16px; border: 1px solid var(--line); border-left: 3px solid var(--accent);
+  border-radius: 8px; background: var(--surface); color: var(--text); font-size: var(--text-sm);
+}
 .empty { padding: 16px 8px; color: var(--muted); font-size: var(--text-sm); }
 
 /* Main */

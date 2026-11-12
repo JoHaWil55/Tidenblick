@@ -11,6 +11,7 @@
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+<noscript><div class="noscript-box">Diese App benötigt JavaScript: Ohne JavaScript können keine Tidenkurven, Wasserstände oder Passierfenster berechnet und angezeigt werden. Bitte aktiviere JavaScript in deinem Browser.</div></noscript>
 <div class="app">
   <header class="topbar">
     <div class="brand">
@@ -47,6 +48,11 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 20l-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         <input id="search" type="search" placeholder="Pegel suchen, z. B. Norderney" autocomplete="off" aria-label="Pegel suchen">
       </label>
+      <button class="geo-btn" id="nearBtn" type="button" title="Nächstgelegenen Pegel über den Standort ermitteln">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        Pegel in meiner Nähe
+      </button>
+      <div class="geo-hint" id="geoHint" aria-live="polite"></div>
       <div class="station-list" id="stationList" role="listbox" aria-label="Pegel an der Nordseeküste"></div>
     </div>
   </aside>

@@ -22,6 +22,16 @@
   };
 
   const $ = (id) => document.getElementById(id);
+  const store = {
+    get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (_) { return null; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) { /* sandboxed preview */ } },
+  };
+  // Naive Zeitangaben (ohne Offset) sind BSH-Lokalzeit Europe/Berlin
+  const tzOffsetMs = (date) => {
+    const p = new Intl.DateTimeFormat('en-US', { timeZone: TZ, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      .formatToParts(date).reduce((a, x) => (a[x.type] = x.value, a), {});
+    return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - date.getTime();
+  };
   const stations = (window.STATIONS || []).slice().sort((a, b) => a.name.localeCompare(b.name, 'de'));
   const byId = Object.fromEntries(stations.map((s) => [s.id, s]));
 
@@ -31,7 +41,15 @@
   const fmtDayLong = new Intl.DateTimeFormat('de-DE', { timeZone: TZ, weekday: 'long', day: 'numeric', month: 'long' });
   const fmtDateTime = new Intl.DateTimeFormat('de-DE', { timeZone: TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   const fmtDayKey = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' });
-  const parseTs = (s) => (s ? new Date(String(s).replace(' ', 'T')) : null);
+  const parseTs = (s) => {
+    if (!s) return null;
+    const str = String(s).trim().replace(' ', 'T');
+    if (/[zZ]$|[+-]\d{2}:?\d{2}$/.test(str)) { const d = new Date(str); return isNaN(d) ? null : d; }
+    let t = Date.parse(str + 'Z');
+    if (isNaN(t)) return null;
+    for (let i = 0; i < 2; i++) t = Date.parse(str + 'Z') - tzOffsetMs(new Date(t));
+    return new Date(t);
+  };
   const num = (v) => { if (v === null || v === undefined || v === '' || v === 'nan') return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const safeRich = (s) => esc(s).replace(/&lt;(\/?)b&gt;/g, '<$1b>').replace(/&lt;br\s*\/?&gt;/g, '<br>');
@@ -108,24 +126,89 @@
   }
 
   // ---------- Station list ----------
+  const FAV_KEY = 'tidenblick:favs';
+  let favs = new Set((store.get(FAV_KEY) || []).filter((x) => byId[x]));
+  const saveFavs = () => store.set(FAV_KEY, [...favs]);
+  const stItemHtml = (s) => `<div class="st-item" role="option" tabindex="0" data-id="${s.id}" aria-selected="${s.id === state.stationId}">
+    <span class="st-name">${esc(s.name)}</span><span class="st-right">${s.curve ? '' : '<span class="st-tag">nur HW/NW</span>'}<span class="st-fav${favs.has(s.id) ? ' active' : ''}" role="button" tabindex="-1" title="${favs.has(s.id) ? 'Favorit entfernen' : 'Als Favorit merken'}" aria-label="${favs.has(s.id) ? 'Favorit entfernen' : 'Als Favorit merken'}: ${esc(s.name)}">★</span></span></div>`;
   function renderList() {
     const q = $('search').value.trim().toLowerCase();
     const list = $('stationList');
+    const all = stations.filter((s) => !q || s.name.toLowerCase().includes(q) || s.area.toLowerCase().includes(q));
+    const favList = all.filter((s) => favs.has(s.id));
     const groups = {};
-    stations.filter((s) => !q || s.name.toLowerCase().includes(q) || s.area.toLowerCase().includes(q))
-      .forEach((s) => { (groups[s.area] = groups[s.area] || []).push(s); });
+    all.filter((s) => !favs.has(s.id)).forEach((s) => { (groups[s.area] = groups[s.area] || []).push(s); });
     const order = AREA_ORDER.filter((a) => groups[a]).concat(Object.keys(groups).filter((a) => !AREA_ORDER.includes(a)));
-    if (!order.length) { list.innerHTML = '<div class="empty">Kein Pegel gefunden. Versuche einen anderen Ortsnamen.</div>'; return; }
-    list.innerHTML = order.map((a) => `
+    if (!order.length && !favList.length) { list.innerHTML = '<div class="empty">Kein Pegel gefunden. Versuche einen anderen Ortsnamen.</div>'; return; }
+    list.innerHTML = (favList.length ? `<div class="group-title">Favoriten</div>${favList.map(stItemHtml).join('')}` : '') +
+      order.map((a) => `
       <div class="group-title">${esc(AREA_SHORT[a] || a)}</div>
-      ${groups[a].map((s) => `<button class="st-item" role="option" data-id="${s.id}" aria-selected="${s.id === state.stationId}">
-        <span>${esc(s.name)}</span>${s.curve ? '' : '<span class="st-tag">nur HW/NW</span>'}</button>`).join('')}
+      ${groups[a].map(stItemHtml).join('')}
     `).join('');
   }
-  $('search').addEventListener('input', renderList);
+  $('search').addEventListener('input', () => { $('geoHint').textContent = ''; renderList(); });
   $('stationList').addEventListener('click', (e) => {
+    const f = e.target.closest('.st-fav');
+    if (f) {
+      const id = f.closest('.st-item').dataset.id;
+      if (favs.has(id)) favs.delete(id); else favs.add(id);
+      saveFavs();
+      renderList();
+      return;
+    }
     const b = e.target.closest('.st-item');
     if (b) selectStation(b.dataset.id);
+  });
+  $('stationList').addEventListener('keydown', (e) => {
+    const items = [...$('stationList').querySelectorAll('.st-item')];
+    const i = items.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const n = e.key === 'ArrowDown' ? Math.min(items.length - 1, i + 1) : Math.max(0, i - 1);
+      if (items[n]) items[n].focus();
+    } else if (e.key === 'Home') { e.preventDefault(); if (items[0]) items[0].focus(); }
+    else if (e.key === 'End') { e.preventDefault(); if (items.length) items[items.length - 1].focus(); }
+    else if ((e.key === 'Enter' || e.key === ' ') && i >= 0) { e.preventDefault(); selectStation(items[i].dataset.id); }
+    else if (e.key === 'Escape' && $('pickerBody').classList.contains('open')) {
+      $('pickerBody').classList.remove('open');
+      $('pickerToggle').setAttribute('aria-expanded', 'false');
+      $('pickerToggle').focus();
+    }
+  });
+  document.querySelectorAll('[role="radiogroup"]').forEach((grp) => {
+    grp.addEventListener('keydown', (e) => {
+      if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+      const btns = [...grp.querySelectorAll('[role="radio"]')];
+      const i = btns.indexOf(document.activeElement);
+      if (i < 0) return;
+      e.preventDefault();
+      const n = (i + (e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1) + btns.length) % btns.length;
+      btns[n].click();
+      btns[n].focus();
+    });
+  });
+
+  // ---------- Geolocation ----------
+  $('nearBtn').addEventListener('click', () => {
+    const hint = $('geoHint');
+    if (!navigator.geolocation) { hint.textContent = 'Standortermittlung wird von diesem Browser nicht unterstützt.'; return; }
+    $('nearBtn').classList.add('spinning');
+    navigator.geolocation.getCurrentPosition((pos) => {
+      $('nearBtn').classList.remove('spinning');
+      const la = pos.coords.latitude, lo = pos.coords.longitude;
+      let best = null, bd = Infinity;
+      for (const s of stations) {
+        const d = (s.lat - la) ** 2 + (((s.lon - lo) * Math.cos(la * Math.PI / 180))) ** 2;
+        if (d < bd) { bd = d; best = s; }
+      }
+      if (!best) return;
+      const km = Math.sqrt(bd) * 111.32;
+      hint.textContent = `Nächster Pegel: ${best.name} (${km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(km < 10 ? 1 : 0)} km`})`;
+      selectStation(best.id);
+    }, () => {
+      $('nearBtn').classList.remove('spinning');
+      hint.textContent = 'Standort konnte nicht ermittelt werden (Berechtigung oder Funkloch).';
+    }, { timeout: 10000 });
   });
   $('pickerToggle').addEventListener('click', () => {
     const body = $('pickerBody');
@@ -158,16 +241,22 @@
   document.querySelectorAll('[data-datum]').forEach((b) => b.addEventListener('click', () => {
     state.datum = b.dataset.datum;
     document.querySelectorAll('[data-datum]').forEach((x) => x.setAttribute('aria-checked', String(x === b)));
+    updateHash();
     renderAll();
   }));
   document.querySelectorAll('[data-range]').forEach((b) => b.addEventListener('click', () => {
     state.rangeDays = Number(b.dataset.range);
     document.querySelectorAll('[data-range]').forEach((x) => x.setAttribute('aria-checked', String(x === b)));
+    updateHash();
     renderChart();
   }));
   $('refreshBtn').addEventListener('click', () => load());
 
   // ---------- Data ----------
+  const CACHE_KEY = 'tidenblick:lastdata';
+  const saveCache = (id, json) => store.set(CACHE_KEY, { id, ts: Date.now(), json });
+  const loadCache = (id) => { const c = store.get(CACHE_KEY); return c && c.id === id && c.json ? c : null; };
+
   async function load() {
     const id = state.stationId;
     const req = ++state.reqId;
@@ -181,12 +270,24 @@
       const json = await res.json();
       if (req !== state.reqId) return;
       state.data = json;
+      state.cacheTs = null;
+      saveCache(id, json);
       prepare();
       renderAll();
     } catch (err) {
       if (req !== state.reqId) return;
-      $('errorBox').hidden = false;
-      $('errorBox').innerHTML = `<div class="notice-title">Daten nicht verfügbar</div>Die Daten des BSH konnten gerade nicht geladen werden (${esc(err.message)}). Bitte versuche es in einigen Minuten erneut.`;
+      const cached = loadCache(id);
+      if (cached) {
+        state.data = cached.json;
+        state.cacheTs = cached.ts;
+        prepare();
+        renderAll();
+        $('errorBox').hidden = false;
+        $('errorBox').innerHTML = `<div class="notice-title">Offline – letzte Daten vom ${fmtDateTime.format(new Date(cached.ts))} Uhr</div>Die BSH-Daten konnten gerade nicht aktualisiert werden (${esc(err.message)}). Es werden die zuletzt geladenen Werte angezeigt.`;
+      } else {
+        $('errorBox').hidden = false;
+        $('errorBox').innerHTML = `<div class="notice-title">Daten nicht verfügbar</div>Die Daten des BSH konnten gerade nicht geladen werden (${esc(err.message)}). Bitte versuche es in einigen Minuten erneut.`;
+      }
       if (!state.data || state.data.id !== id) clearSkeletons();
     } finally {
       if (req === state.reqId) { state.loading = false; $('refreshBtn').classList.remove('spinning'); }
@@ -683,6 +784,8 @@
   function readWhFromHash(q) {
     const w = state.wh;
     const n = (k) => { const v = q.get(k); if (v === null || v === '') return null; const x = Number(v); return Number.isFinite(x) ? x : null; };
+    if (q.get('bez') && ['PNP', 'NHN', 'SKN'].includes(q.get('bez'))) state.datum = q.get('bez');
+    if ([1, 3, 7].includes(Number(q.get('zr')))) state.rangeDays = Number(q.get('zr'));
     if (q.get('fw') && PRESETS.some((x) => x.id === q.get('fw'))) w.preset = q.get('fw');
     if (q.get('wh')) w.name = q.get('wh').slice(0, 40);
     if (q.get('art') === 'tiefe') w.mode = 'depth';
@@ -694,9 +797,10 @@
   }
   function updateHash() {
     const w = state.wh;
-    let h = '#' + state.stationId;
+    const q = new URLSearchParams();
+    if (state.datum !== 'PNP') q.set('bez', state.datum);
+    if (state.rangeDays !== 1) q.set('zr', String(state.rangeDays));
     if (w.h !== null || w.preset) {
-      const q = new URLSearchParams();
       if (w.preset) q.set('fw', w.preset);
       if (w.name) q.set('wh', w.name);
       if (w.mode === 'depth') q.set('art', 'tiefe');
@@ -704,8 +808,9 @@
       q.set('tg', w.draft); q.set('hk', w.margin);
       if (w.offset) q.set('vz', w.offset);
       if (!w.useFc) q.set('vh', '0');
-      h += '&' + q.toString();
     }
+    const qs = q.toString();
+    const h = '#' + encodeURIComponent(state.stationId) + (qs ? '&' + qs : '');
     try { history.replaceState(null, '', h); } catch (_) { /* sandboxed preview */ }
   }
 
@@ -846,6 +951,12 @@
   })();
   const srcLink = (k) => (PSRC[k] ? `<a href="${esc(PSRC[k].url)}" target="_blank" rel="noopener">${esc(PSRC[k].label)} ↗</a>` : '');
   const mFmt = (v) => v.toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 2 });
+  const monthsOld = (d) => {
+    const [m, y] = String(d).split('.').map(Number);
+    if (!m || !y) return null;
+    const now = new Date();
+    return (now.getFullYear() - y) * 12 + (now.getMonth() + 1 - m);
+  };
   // Richtwerte als Höhe über SKN in m (positiv = trockenfallend)
   function presetValues(P) {
     const vals = [];
@@ -875,6 +986,10 @@
     const offTxt = P.off ? `${P.off > 0 ? '+' : '−'}${Math.abs(P.off)} Min.` : '0 Min.';
     let html = `<div class="pi-row">Bezugspegel <b>${esc(g ? g.name : P.gauge)}</b> · Zeitversatz <b class="mono">${offTxt}</b> — ${esc(P.offNote)}${P.offSrc ? ` (${srcLink(P.offSrc)})` : ''}</div>`;
     if (state.stationId !== P.gauge) html += `<div class="pi-row pi-warn">Gewählter Pegel weicht vom empfohlenen Bezugspegel ab. <button type="button" class="pi-take" data-pgauge="${esc(P.gauge)}">${esc(g ? g.name : P.gauge)} wählen</button></div>`;
+    if (P.wsg && P.wsg.date) {
+      const age = monthsOld(P.wsg.date);
+      if (age !== null && age > 6) html += `<div class="pi-row pi-warn">Die hinterlegte Lotung stammt von ${esc(String(P.wsg.date))} und ist damit über ${age} Monate alt – bitte vor der Fahrt aktuelle Peilungen bzw. die Seekarte prüfen.</div>`;
+    }
     if (w.offset !== P.off) html += `<div class="pi-row pi-warn">Zeitversatz geändert (empfohlen ${offTxt}).</div>`;
     if (vals.length) {
       html += '<div class="pi-row">Richtwerte für die Kartenhöhe – bitte mit der aktuellen Seekarte vergleichen und selbst übernehmen:</div><div class="pi-vals">';
@@ -928,6 +1043,8 @@
   } catch (_) { /* ignore */ }
   state.stationId = initial;
   writeWhForm();
+  document.querySelectorAll('[data-datum]').forEach((x) => x.setAttribute('aria-checked', String(x.dataset.datum === state.datum)));
+  document.querySelectorAll('[data-range]').forEach((x) => x.setAttribute('aria-checked', String(Number(x.dataset.range) === state.rangeDays)));
   renderList();
   initMap();
   $('pickerCurrent').textContent = byId[initial] ? byId[initial].name : '';
