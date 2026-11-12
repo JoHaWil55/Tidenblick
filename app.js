@@ -812,6 +812,31 @@
     const qs = q.toString();
     const h = '#' + encodeURIComponent(state.stationId) + (qs ? '&' + qs : '');
     try { history.replaceState(null, '', h); } catch (_) { /* sandboxed preview */ }
+    saveSettings();
+  }
+
+  // ---------- Gespeicherte Einstellungen ----------
+  const SETTINGS_KEY = 'tidenblick:settings';
+  function saveSettings() {
+    store.set(SETTINGS_KEY, { station: state.stationId, datum: state.datum, range: state.rangeDays, wh: state.wh });
+  }
+  function loadSettings() {
+    const s = store.get(SETTINGS_KEY);
+    if (!s) return null;
+    if (s.datum && ['PNP', 'NHN', 'SKN'].includes(s.datum)) state.datum = s.datum;
+    if ([1, 3, 7].includes(s.range)) state.rangeDays = s.range;
+    if (s.wh && typeof s.wh === 'object') {
+      const w = state.wh;
+      ['preset', 'name', 'mode', 'h', 'draft', 'margin', 'offset', 'useFc'].forEach((k) => { if (k in s.wh) w[k] = s.wh[k]; });
+      if (!['dry', 'depth'].includes(w.mode)) w.mode = 'dry';
+      if (!PRESETS.some((x) => x.id === w.preset)) w.preset = '';
+      w.h = w.h === null || w.h === undefined ? null : clamp(Math.abs(Number(w.h) || 0), 0, 10);
+      w.draft = clamp(Number(w.draft) || 0, 0, 6);
+      w.margin = clamp(Number(w.margin) || 0, 0, 3);
+      w.offset = Math.round(clamp(Number(w.offset) || 0, -180, 180));
+      w.useFc = w.useFc !== false;
+    }
+    return s;
   }
 
   // Höhe des Wattenhochs über SKN in cm (trockenfallend positiv, Tiefe negativ)
@@ -1035,10 +1060,12 @@
 
   // ---------- Init ----------
   let initial = DEFAULT_STATION;
+  const saved = loadSettings();
   try {
     const parts = (location.hash || '').slice(1).split('&');
     const h = decodeURIComponent(parts[0] || '');
     if (byId[h]) initial = h;
+    else if (saved && saved.station && byId[saved.station]) initial = saved.station;
     readWhFromHash(new URLSearchParams(parts.slice(1).join('&')));
   } catch (_) { /* ignore */ }
   state.stationId = initial;
