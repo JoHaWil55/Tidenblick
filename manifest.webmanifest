@@ -1,15 +1,16 @@
 {
   "name": "Tidenblick Nordsee",
   "short_name": "Tidenblick",
-  "description": "Tidenkurven, Hoch- und Niedrigwasser sowie Wasserstandsvorhersagen für Pegel an der deutschen Nordseeküste – auf Basis der offenen BSH-Daten.",
+  "description": "Tidenkurven, Hoch- und Niedrigwasser und Wattenhoch-Planung für die deutsche Nordseeküste (Daten des BSH).",
   "lang": "de",
-  "start_url": "./index.html",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "background_color": "#f3f0e8",
   "theme_color": "#0d5a70",
   "icons": [
-    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

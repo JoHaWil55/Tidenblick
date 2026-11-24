@@ -4,6 +4,7 @@
   const API = 'https://gdi.bsh.de/ldproxy/rest/services/WaterLevelForecast/collections/waterlevelforecastdata/items/';
   const TZ = 'Europe/Berlin';
   const DEFAULT_STATION = 'leerort';
+  const LAST_KEY = 'tidenblick.station'; // zuletzt gewählter Pegel (nur auf diesem Gerät)
   const AREA_ORDER = ['Ems', 'Jade und Ostfriesland', 'Weser', 'Elbe', 'Nordfriesland bis Elbmündung (inkl. Helgoland)'];
   const AREA_SHORT = { 'Nordfriesland bis Elbmündung (inkl. Helgoland)': 'Nordfriesland & Helgoland' };
   const REFRESH_MS = 10 * 60 * 1000;
@@ -22,16 +23,6 @@
   };
 
   const $ = (id) => document.getElementById(id);
-  const store = {
-    get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (_) { return null; } },
-    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) { /* sandboxed preview */ } },
-  };
-  // Naive Zeitangaben (ohne Offset) sind BSH-Lokalzeit Europe/Berlin
-  const tzOffsetMs = (date) => {
-    const p = new Intl.DateTimeFormat('en-US', { timeZone: TZ, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
-      .formatToParts(date).reduce((a, x) => (a[x.type] = x.value, a), {});
-    return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - date.getTime();
-  };
   const stations = (window.STATIONS || []).slice().sort((a, b) => a.name.localeCompare(b.name, 'de'));
   const byId = Object.fromEntries(stations.map((s) => [s.id, s]));
 
@@ -41,17 +32,10 @@
   const fmtDayLong = new Intl.DateTimeFormat('de-DE', { timeZone: TZ, weekday: 'long', day: 'numeric', month: 'long' });
   const fmtDateTime = new Intl.DateTimeFormat('de-DE', { timeZone: TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   const fmtDayKey = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' });
-  const parseTs = (s) => {
-    if (!s) return null;
-    const str = String(s).trim().replace(' ', 'T');
-    if (/[zZ]$|[+-]\d{2}:?\d{2}$/.test(str)) { const d = new Date(str); return isNaN(d) ? null : d; }
-    let t = Date.parse(str + 'Z');
-    if (isNaN(t)) return null;
-    for (let i = 0; i < 2; i++) t = Date.parse(str + 'Z') - tzOffsetMs(new Date(t));
-    return new Date(t);
-  };
+  const parseTs = (s) => (s ? new Date(String(s).replace(' ', 'T')) : null);
   const num = (v) => { if (v === null || v === undefined || v === '' || v === 'nan') return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const safeUrl = (u) => (/^https?:\/\//i.test(String(u || '').trim()) ? String(u).trim() : '#');
   const safeRich = (s) => esc(s).replace(/&lt;(\/?)b&gt;/g, '<$1b>').replace(/&lt;br\s*\/?&gt;/g, '<br>');
 
   function toDatum(v) {
@@ -78,9 +62,12 @@
   const root = document.documentElement;
   let theme = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   root.setAttribute('data-theme', theme);
+  const setThemeColor = () => { const m = document.querySelector('meta[name="theme-color"]'); if (m) m.content = theme === 'dark' ? '#101c24' : '#fbfaf6'; };
+  setThemeColor();
   $('themeBtn').addEventListener('click', () => {
     theme = theme === 'dark' ? 'light' : 'dark';
     root.setAttribute('data-theme', theme);
+    setThemeColor();
     setTiles();
     renderChart();
     updateMarkers();
@@ -97,7 +84,7 @@
     stations.forEach((s) => {
       const m = L.circleMarker([s.lat, s.lon], { radius: 5, weight: 1.5 });
       m.bindTooltip(s.name, { direction: 'top', offset: [0, -4] });
-      m.on('click', () => selectStation(s.id, { fromMap: true }));
+      m.on('click', () => selectStation(s.id, { fromMap: true, picker: true }));
       m.addTo(map);
       markers[s.id] = m;
     });
@@ -126,111 +113,49 @@
   }
 
   // ---------- Station list ----------
-  const FAV_KEY = 'tidenblick:favs';
-  let favs = new Set((store.get(FAV_KEY) || []).filter((x) => byId[x]));
-  const saveFavs = () => store.set(FAV_KEY, [...favs]);
-  const stItemHtml = (s) => `<div class="st-item" role="option" tabindex="0" data-id="${s.id}" aria-selected="${s.id === state.stationId}">
-    <span class="st-name">${esc(s.name)}</span><span class="st-right">${s.curve ? '' : '<span class="st-tag">nur HW/NW</span>'}<span class="st-fav${favs.has(s.id) ? ' active' : ''}" role="button" tabindex="-1" title="${favs.has(s.id) ? 'Favorit entfernen' : 'Als Favorit merken'}" aria-label="${favs.has(s.id) ? 'Favorit entfernen' : 'Als Favorit merken'}: ${esc(s.name)}">★</span></span></div>`;
   function renderList() {
     const q = $('search').value.trim().toLowerCase();
     const list = $('stationList');
-    const all = stations.filter((s) => !q || s.name.toLowerCase().includes(q) || s.area.toLowerCase().includes(q));
-    const favList = all.filter((s) => favs.has(s.id));
     const groups = {};
-    all.filter((s) => !favs.has(s.id)).forEach((s) => { (groups[s.area] = groups[s.area] || []).push(s); });
+    stations.filter((s) => !q || s.name.toLowerCase().includes(q) || s.area.toLowerCase().includes(q))
+      .forEach((s) => { (groups[s.area] = groups[s.area] || []).push(s); });
     const order = AREA_ORDER.filter((a) => groups[a]).concat(Object.keys(groups).filter((a) => !AREA_ORDER.includes(a)));
-    if (!order.length && !favList.length) { list.innerHTML = '<div class="empty">Kein Pegel gefunden. Versuche einen anderen Ortsnamen.</div>'; return; }
-    list.innerHTML = (favList.length ? `<div class="group-title">Favoriten</div>${favList.map(stItemHtml).join('')}` : '') +
-      order.map((a) => `
+    if (!order.length) { list.innerHTML = '<div class="empty">Kein Pegel gefunden. Versuche einen anderen Ortsnamen.</div>'; return; }
+    list.innerHTML = order.map((a) => `
       <div class="group-title">${esc(AREA_SHORT[a] || a)}</div>
-      ${groups[a].map(stItemHtml).join('')}
+      ${groups[a].map((s) => `<button class="st-item" role="option" data-id="${s.id}" aria-selected="${s.id === state.stationId}">
+        <span>${esc(s.name)}</span>${s.curve ? '' : '<span class="st-tag">nur HW/NW</span>'}</button>`).join('')}
     `).join('');
   }
-  $('search').addEventListener('input', () => { $('geoHint').textContent = ''; renderList(); });
+  $('search').addEventListener('input', renderList);
   $('stationList').addEventListener('click', (e) => {
-    const f = e.target.closest('.st-fav');
-    if (f) {
-      const id = f.closest('.st-item').dataset.id;
-      if (favs.has(id)) favs.delete(id); else favs.add(id);
-      saveFavs();
-      renderList();
-      return;
-    }
     const b = e.target.closest('.st-item');
-    if (b) selectStation(b.dataset.id);
-  });
-  $('stationList').addEventListener('keydown', (e) => {
-    const items = [...$('stationList').querySelectorAll('.st-item')];
-    const i = items.indexOf(document.activeElement);
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      e.preventDefault();
-      const n = e.key === 'ArrowDown' ? Math.min(items.length - 1, i + 1) : Math.max(0, i - 1);
-      if (items[n]) items[n].focus();
-    } else if (e.key === 'Home') { e.preventDefault(); if (items[0]) items[0].focus(); }
-    else if (e.key === 'End') { e.preventDefault(); if (items.length) items[items.length - 1].focus(); }
-    else if ((e.key === 'Enter' || e.key === ' ') && i >= 0) { e.preventDefault(); selectStation(items[i].dataset.id); }
-    else if (e.key === 'Escape' && $('pickerBody').classList.contains('open')) {
-      $('pickerBody').classList.remove('open');
-      $('pickerToggle').setAttribute('aria-expanded', 'false');
-      $('pickerToggle').focus();
-    }
-  });
-  document.querySelectorAll('[role="radiogroup"]').forEach((grp) => {
-    grp.addEventListener('keydown', (e) => {
-      if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
-      const btns = [...grp.querySelectorAll('[role="radio"]')];
-      const i = btns.indexOf(document.activeElement);
-      if (i < 0) return;
-      e.preventDefault();
-      const n = (i + (e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : -1) + btns.length) % btns.length;
-      btns[n].click();
-      btns[n].focus();
-    });
-  });
-
-  // ---------- Geolocation ----------
-  $('nearBtn').addEventListener('click', () => {
-    const hint = $('geoHint');
-    if (!navigator.geolocation) { hint.textContent = 'Standortermittlung wird von diesem Browser nicht unterstützt.'; return; }
-    $('nearBtn').classList.add('spinning');
-    navigator.geolocation.getCurrentPosition((pos) => {
-      $('nearBtn').classList.remove('spinning');
-      const la = pos.coords.latitude, lo = pos.coords.longitude;
-      let best = null, bd = Infinity;
-      for (const s of stations) {
-        const d = (s.lat - la) ** 2 + (((s.lon - lo) * Math.cos(la * Math.PI / 180))) ** 2;
-        if (d < bd) { bd = d; best = s; }
-      }
-      if (!best) return;
-      const km = Math.sqrt(bd) * 111.32;
-      hint.textContent = `Nächster Pegel: ${best.name} (${km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(km < 10 ? 1 : 0)} km`})`;
-      selectStation(best.id);
-    }, () => {
-      $('nearBtn').classList.remove('spinning');
-      hint.textContent = 'Standort konnte nicht ermittelt werden (Berechtigung oder Funkloch).';
-    }, { timeout: 10000 });
+    if (b) selectStation(b.dataset.id, { picker: true });
   });
   $('pickerToggle').addEventListener('click', () => {
     const body = $('pickerBody');
     const open = !body.classList.contains('open');
     body.classList.toggle('open', open);
     $('pickerToggle').setAttribute('aria-expanded', String(open));
-    if (open && map) setTimeout(() => map.invalidateSize(), 50);
-  });
-  document.querySelectorAll('.quicknav button').forEach((b) => b.addEventListener('click', () => {
-    const el = document.getElementById(b.dataset.target);
-    if (!el) return;
-    if (el.id === 'sidebar' && !$('pickerBody').classList.contains('open')) {
-      $('pickerBody').classList.add('open');
-      $('pickerToggle').setAttribute('aria-expanded', 'true');
-      if (map) setTimeout(() => map.invalidateSize(), 50);
+    if (open) {
+      setPickerView('list');
+      // gewählten Pegel in der Liste in die Mitte rücken
+      const list = $('stationList'), sel = list.querySelector('[aria-selected="true"]');
+      if (sel) list.scrollTop += sel.getBoundingClientRect().top - list.getBoundingClientRect().top - list.clientHeight / 2 + sel.offsetHeight / 2;
     }
-    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }));
+  });
+  // Smartphone: Liste oder Karte (statt beides untereinander)
+  function setPickerView(v) {
+    $('pickerBody').dataset.view = v;
+    document.querySelectorAll('[data-ptab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.ptab === v)));
+    if (v === 'map' && map) setTimeout(() => { map.invalidateSize(); const s = byId[state.stationId]; if (s) map.setView([s.lat, s.lon], map.getZoom()); }, 60);
+  }
+  document.querySelectorAll('[data-ptab]').forEach((b) => b.addEventListener('click', () => setPickerView(b.dataset.ptab)));
 
   function selectStation(id, opts = {}) {
     if (!byId[id]) return;
     state.stationId = id;
+    if (opts.picker) { try { localStorage.setItem(LAST_KEY, id); } catch (_) { /* Speicher nicht verfügbar */ } }
     updateHash();
     renderList();
     updateMarkers();
@@ -242,7 +167,10 @@
     if (map && !opts.fromMap) map.panTo([byId[id].lat, byId[id].lon], { animate: true });
     if (window.matchMedia('(max-width: 860px)').matches) {
       $('pickerBody').classList.remove('open');
+      $('pickerBody').dataset.view = 'list';
       $('pickerToggle').setAttribute('aria-expanded', 'false');
+      // Smartphone: nach der Pegelwahl zur Tidenkurve springen (sie steht oberhalb der Auswahl)
+      if (opts.picker) $('secChart').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     load();
   }
@@ -251,22 +179,34 @@
   document.querySelectorAll('[data-datum]').forEach((b) => b.addEventListener('click', () => {
     state.datum = b.dataset.datum;
     document.querySelectorAll('[data-datum]').forEach((x) => x.setAttribute('aria-checked', String(x === b)));
-    updateHash();
     renderAll();
   }));
   document.querySelectorAll('[data-range]').forEach((b) => b.addEventListener('click', () => {
     state.rangeDays = Number(b.dataset.range);
     document.querySelectorAll('[data-range]').forEach((x) => x.setAttribute('aria-checked', String(x === b)));
-    updateHash();
     renderChart();
   }));
   $('refreshBtn').addEventListener('click', () => load());
 
-  // ---------- Data ----------
-  const CACHE_KEY = 'tidenblick:lastdata';
-  const saveCache = (id, json) => store.set(CACHE_KEY, { id, ts: Date.now(), json });
-  const loadCache = (id) => { const c = store.get(CACHE_KEY); return c && c.id === id && c.json ? c : null; };
+  // Schnellnavigation (Smartphone): per Button statt #-Anker, damit der URL-Hash (Pegel, Wattenhoch) erhalten bleibt
+  document.querySelectorAll('[data-jump]').forEach((b) => b.addEventListener('click', () => {
+    const el = $(b.dataset.jump);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }));
+  // Hoch-/Niedrigwasser: auf dem Smartphone zunächst nur heute und morgen
+  $('eventsMore').addEventListener('click', () => {
+    const all = $('secEvents').classList.toggle('events-all');
+    $('eventsMore').textContent = all ? 'Weniger anzeigen' : 'Alle Tage anzeigen';
+  });
+  // Wattenhoch-Eingaben ein-/ausklappen (nur Smartphone sichtbar)
+  function setWhCollapsed(c) {
+    $('whCard').classList.toggle('collapsed', c);
+    $('whToggle').setAttribute('aria-expanded', String(!c));
+    $('whToggle').textContent = c ? 'Eingaben ändern' : 'Eingaben ausblenden';
+  }
+  $('whToggle').addEventListener('click', () => setWhCollapsed(!$('whCard').classList.contains('collapsed')));
 
+  // ---------- Data ----------
   async function load() {
     const id = state.stationId;
     const req = ++state.reqId;
@@ -274,38 +214,32 @@
     $('refreshBtn').classList.add('spinning');
     $('errorBox').hidden = true;
     if (!state.data || state.data.id !== id) showLoading(byId[id]);
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 30000); // schwaches Netz: nicht endlos laden
     try {
-      const res = await fetch(`${API}${encodeURIComponent(id)}?lang=de&f=json`, { headers: { Accept: 'application/geo+json, application/json' } });
+      const res = await fetch(`${API}${encodeURIComponent(id)}?lang=de&f=json`, { headers: { Accept: 'application/geo+json, application/json' }, signal: ctl.signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       if (req !== state.reqId) return;
+      state.lastLoad = Date.now();
+      state.offline = res.headers.get('x-offline-cache') === '1';
       state.data = json;
-      state.cacheTs = null;
-      saveCache(id, json);
       prepare();
       renderAll();
     } catch (err) {
       if (req !== state.reqId) return;
-      const cached = loadCache(id);
-      if (cached) {
-        state.data = cached.json;
-        state.cacheTs = cached.ts;
-        prepare();
-        renderAll();
-        $('errorBox').hidden = false;
-        $('errorBox').innerHTML = `<div class="notice-title">Offline – letzte Daten vom ${fmtDateTime.format(new Date(cached.ts))} Uhr</div>Die BSH-Daten konnten gerade nicht aktualisiert werden (${esc(err.message)}). Es werden die zuletzt geladenen Werte angezeigt.`;
-      } else {
-        $('errorBox').hidden = false;
-        $('errorBox').innerHTML = `<div class="notice-title">Daten nicht verfügbar</div>Die Daten des BSH konnten gerade nicht geladen werden (${esc(err.message)}). Bitte versuche es in einigen Minuten erneut.`;
-      }
+      $('errorBox').hidden = false;
+      $('errorBox').innerHTML = `<div class="notice-title">Daten nicht verfügbar</div>Die Daten des BSH konnten gerade nicht geladen werden (${esc(err.name === 'AbortError' ? 'Zeitüberschreitung' : err.message)}). Bitte versuche es in einigen Minuten erneut.`;
       if (!state.data || state.data.id !== id) clearSkeletons();
     } finally {
+      clearTimeout(timer);
       if (req === state.reqId) { state.loading = false; $('refreshBtn').classList.remove('spinning'); }
     }
   }
 
   function showLoading(s) {
     $('stName').textContent = s ? s.name : 'Pegel wird geladen …';
+    $('chartStation').textContent = s ? s.name : '';
     $('stArea').textContent = s ? (AREA_SHORT[s.area] || s.area) : '';
     $('stMeta').textContent = 'Daten werden vom BSH abgerufen …';
     $('stStatus').innerHTML = '';
@@ -363,9 +297,12 @@
     return out;
   }
 
+  // Binäre Suche in der nach Zeit sortierten Kurve (bewusst ohne d3, damit Kennzahlen auch ohne Diagramm-Bibliothek laufen)
+  function lowerBound(s, t) { let lo = 0, hi = s.length; while (lo < hi) { const mid = (lo + hi) >> 1; if (s[mid].t < t) lo = mid + 1; else hi = mid; } return lo; }
+  function nearestIndex(s, t) { const i = lowerBound(s, t); return i > 0 && (i === s.length || t - s[i - 1].t <= s[i].t - t) ? i - 1 : i; }
   function valueAt(field, t) {
     const s = state.series; if (!s || !s.length) return null;
-    const i = d3.bisector((d) => d.t).left(s, t);
+    const i = lowerBound(s, t);
     const a = s[Math.max(0, i - 1)], b = s[Math.min(s.length - 1, i)];
     if (!a || !b || a[field] === null || b[field] === null) return (b && b[field]) ?? (a && a[field]) ?? null;
     if (+b.t === +a.t) return a[field];
@@ -398,11 +335,13 @@
     const p = state.data.properties;
     const s = byId[state.stationId] || {};
     $('stName').textContent = p.gauge_label || s.name;
+    $('chartStation').textContent = p.gauge_label || s.name;
     $('stArea').textContent = `${AREA_SHORT[p.area] || p.area || ''} · ${p.state || ''}`;
     const ft = parseTs(p.forecast_timestamp), ct = parseTs(p.automated_curveforecast_timestamp);
     const parts = [];
     if (ft) parts.push(`Vorhersage vom ${fmtDateTime.format(ft)} Uhr`);
     if (ct) parts.push(`Kurve vom ${fmtDateTime.format(ct)} Uhr`);
+    if (state.offline) parts.unshift('Keine Verbindung – zuletzt gespeicherte Daten');
     $('stMeta').textContent = parts.join(' · ');
     const w = p.automated_gauge_warning || p.official_warning_level_region;
     const hasOfficial = state.events.some((e) => e.fc && e.fc.src === 'amtlich');
@@ -489,9 +428,10 @@
   function renderChart() {
     const svgEl = $('chart');
     const wrap = $('chartWrap');
+    if (!window.d3) { $('chartNote').textContent = state.data ? 'Das Diagramm konnte nicht geladen werden (Bibliothek nicht erreichbar). Alle Zahlen darunter sind weiterhin verfügbar.' : ''; return; }
     const svg = d3.select(svgEl);
     svg.selectAll('*').remove();
-    if (!state.data || !state.series || !state.series.length || !window.d3) {
+    if (!state.data || !state.series || !state.series.length) {
       $('chartNote').textContent = state.data ? 'Für diesen Pegel liegen keine Kurvendaten vor.' : '';
       return;
     }
@@ -675,9 +615,13 @@
     const nextIdx = ev.findIndex((e) => e.t > now);
     let lastDay = '';
     const rows = [];
+    // Tagesindex relativ zum Tag der nächsten Tide (0 = heute/nächster Tag) – für die gekürzte Smartphone-Ansicht
+    const dayKeys = [...new Set(ev.map((e) => fmtDayKey.format(e.t)))];
+    const baseDay = Math.max(0, dayKeys.indexOf(fmtDayKey.format((ev[nextIdx] || ev[ev.length - 1]).t)));
     ev.forEach((e, i) => {
       const key = fmtDayKey.format(e.t);
-      if (key !== lastDay) { lastDay = key; rows.push(`<tr class="day"><td colspan="5" class="daycell">${esc(fmtDayLong.format(e.t))}</td></tr>`); }
+      const di = dayKeys.indexOf(key) - baseDay;
+      if (key !== lastDay) { lastDay = key; rows.push(`<tr class="day" data-d="${di}"><td colspan="5" class="daycell">${esc(fmtDayLong.format(e.t))}</td></tr>`); }
       const fc = e.fc;
       let dev = '–';
       if (fc && fc.dev) {
@@ -685,7 +629,7 @@
         const cls = n > 0 ? 'dev-pos' : n < 0 ? 'dev-neg' : '';
         dev = `<span class="${cls}">${esc(String(fc.dev).replace(' m', ''))} m</span>`;
       }
-      rows.push(`<tr class="${e.t < now ? 'past' : ''} ${i === nextIdx ? 'next' : ''}">
+      rows.push(`<tr data-d="${di}" class="${e.t < now ? 'past' : ''} ${i === nextIdx ? 'next' : ''}">
         <td class="mono">${fmtTime.format(e.t)}</td>
         <td><span class="tide-pill ${e.type === 'HW' ? 'hw' : 'nw'}"><span class="long">${e.type === 'HW' ? 'Hochwasser' : 'Niedrigwasser'}</span><span class="short">${e.type}</span></span></td>
         <td class="num">${cm(toDatum(e.pred))}</td>
@@ -759,8 +703,8 @@
     $('facts').innerHTML = rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
     $('refSub').textContent = `Bezugshöhen und Mittelwerte · Anzeige in ${datumLabel()}`;
     const links = [];
-    if (p.bsh_url_waterlevel) links.push(`<a href="${esc(p.bsh_url_waterlevel)}" target="_blank" rel="noopener">BSH-Wasserstandsseite ↗</a>`);
-    if (p.measurement_url) links.push(`<a href="${esc(p.measurement_url.trim())}" target="_blank" rel="noopener">Messwerte beim Betreiber ↗</a>`);
+    if (p.bsh_url_waterlevel) links.push(`<a href="${esc(safeUrl(p.bsh_url_waterlevel))}" target="_blank" rel="noopener">BSH-Wasserstandsseite ↗</a>`);
+    if (p.measurement_url) links.push(`<a href="${esc(safeUrl(p.measurement_url))}" target="_blank" rel="noopener">Messwerte beim Betreiber ↗</a>`);
     links.push('<a href="https://gezeiten.bsh.de/" target="_blank" rel="noopener">BSH-Gezeitenvorausberechnung ↗</a>');
     $('links').innerHTML = links.join('');
   }
@@ -794,8 +738,6 @@
   function readWhFromHash(q) {
     const w = state.wh;
     const n = (k) => { const v = q.get(k); if (v === null || v === '') return null; const x = Number(v); return Number.isFinite(x) ? x : null; };
-    if (q.get('bez') && ['PNP', 'NHN', 'SKN'].includes(q.get('bez'))) state.datum = q.get('bez');
-    if ([1, 3, 7].includes(Number(q.get('zr')))) state.rangeDays = Number(q.get('zr'));
     if (q.get('fw') && PRESETS.some((x) => x.id === q.get('fw'))) w.preset = q.get('fw');
     if (q.get('wh')) w.name = q.get('wh').slice(0, 40);
     if (q.get('art') === 'tiefe') w.mode = 'depth';
@@ -807,10 +749,9 @@
   }
   function updateHash() {
     const w = state.wh;
-    const q = new URLSearchParams();
-    if (state.datum !== 'PNP') q.set('bez', state.datum);
-    if (state.rangeDays !== 1) q.set('zr', String(state.rangeDays));
+    let h = '#' + state.stationId;
     if (w.h !== null || w.preset) {
+      const q = new URLSearchParams();
       if (w.preset) q.set('fw', w.preset);
       if (w.name) q.set('wh', w.name);
       if (w.mode === 'depth') q.set('art', 'tiefe');
@@ -818,35 +759,9 @@
       q.set('tg', w.draft); q.set('hk', w.margin);
       if (w.offset) q.set('vz', w.offset);
       if (!w.useFc) q.set('vh', '0');
+      h += '&' + q.toString();
     }
-    const qs = q.toString();
-    const h = '#' + encodeURIComponent(state.stationId) + (qs ? '&' + qs : '');
     try { history.replaceState(null, '', h); } catch (_) { /* sandboxed preview */ }
-    saveSettings();
-  }
-
-  // ---------- Gespeicherte Einstellungen ----------
-  const SETTINGS_KEY = 'tidenblick:settings';
-  function saveSettings() {
-    store.set(SETTINGS_KEY, { station: state.stationId, datum: state.datum, range: state.rangeDays, wh: state.wh });
-  }
-  function loadSettings() {
-    const s = store.get(SETTINGS_KEY);
-    if (!s) return null;
-    if (s.datum && ['PNP', 'NHN', 'SKN'].includes(s.datum)) state.datum = s.datum;
-    if ([1, 3, 7].includes(s.range)) state.rangeDays = s.range;
-    if (s.wh && typeof s.wh === 'object') {
-      const w = state.wh;
-      ['preset', 'name', 'mode', 'h', 'draft', 'margin', 'offset', 'useFc'].forEach((k) => { if (k in s.wh) w[k] = s.wh[k]; });
-      if (!['dry', 'depth'].includes(w.mode)) w.mode = 'dry';
-      if (!PRESETS.some((x) => x.id === w.preset)) w.preset = '';
-      w.h = w.h === null || w.h === undefined ? null : clamp(Math.abs(Number(w.h) || 0), 0, 10);
-      w.draft = clamp(Number(w.draft) || 0, 0, 6);
-      w.margin = clamp(Number(w.margin) || 0, 0, 3);
-      w.offset = Math.round(clamp(Number(w.offset) || 0, -180, 180));
-      w.useFc = w.useFc !== false;
-    }
-    return s;
   }
 
   // Höhe des Wattenhochs über SKN in cm (trockenfallend positiv, Tiefe negativ)
@@ -933,7 +848,7 @@
     const nowDepth = (() => {
       const s = state.series || []; if (!s.length) return null;
       const tg = new Date(+now - w.offset * 60e3);
-      const i = d3.bisector((d) => d.t).center(s, tg);
+      const i = nearestIndex(s, tg);
       return s[i] && Math.abs(s[i].t - tg) < 40 * 60e3 ? whDepthFromPoint(s[i]) : null;
     })();
     const curW = wins.find((x) => x.start <= now && x.end >= now);
@@ -986,12 +901,6 @@
   })();
   const srcLink = (k) => (PSRC[k] ? `<a href="${esc(PSRC[k].url)}" target="_blank" rel="noopener">${esc(PSRC[k].label)} ↗</a>` : '');
   const mFmt = (v) => v.toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 2 });
-  const monthsOld = (d) => {
-    const [m, y] = String(d).split('.').map(Number);
-    if (!m || !y) return null;
-    const now = new Date();
-    return (now.getFullYear() - y) * 12 + (now.getMonth() + 1 - m);
-  };
   // Richtwerte als Höhe über SKN in m (positiv = trockenfallend)
   function presetValues(P) {
     const vals = [];
@@ -1021,10 +930,6 @@
     const offTxt = P.off ? `${P.off > 0 ? '+' : '−'}${Math.abs(P.off)} Min.` : '0 Min.';
     let html = `<div class="pi-row">Bezugspegel <b>${esc(g ? g.name : P.gauge)}</b> · Zeitversatz <b class="mono">${offTxt}</b> — ${esc(P.offNote)}${P.offSrc ? ` (${srcLink(P.offSrc)})` : ''}</div>`;
     if (state.stationId !== P.gauge) html += `<div class="pi-row pi-warn">Gewählter Pegel weicht vom empfohlenen Bezugspegel ab. <button type="button" class="pi-take" data-pgauge="${esc(P.gauge)}">${esc(g ? g.name : P.gauge)} wählen</button></div>`;
-    if (P.wsg && P.wsg.date) {
-      const age = monthsOld(P.wsg.date);
-      if (age !== null && age > 6) html += `<div class="pi-row pi-warn">Die hinterlegte Lotung stammt von ${esc(String(P.wsg.date))} und ist damit über ${age} Monate alt – bitte vor der Fahrt aktuelle Peilungen bzw. die Seekarte prüfen.</div>`;
-    }
     if (w.offset !== P.off) html += `<div class="pi-row pi-warn">Zeitversatz geändert (empfohlen ${offTxt}).</div>`;
     if (vals.length) {
       html += '<div class="pi-row">Richtwerte für die Kartenhöhe – bitte mit der aktuellen Seekarte vergleichen und selbst übernehmen:</div><div class="pi-vals">';
@@ -1069,19 +974,25 @@
   }));
 
   // ---------- Init ----------
-  let initial = DEFAULT_STATION;
-  const saved = loadSettings();
+  // Startpegel: Pegel im Link > zuletzt gewählter Pegel > Standard.
+  // In der installierten App gilt der zuletzt gewählte Pegel auch dann, wenn nur ein alter Link ohne weitere Angaben gespeichert wurde.
+  let initial = DEFAULT_STATION, hashStation = null, hashBare = true, savedStation = null;
+  try { savedStation = localStorage.getItem(LAST_KEY); } catch (_) { /* ignore */ }
   try {
     const parts = (location.hash || '').slice(1).split('&');
     const h = decodeURIComponent(parts[0] || '');
-    if (byId[h]) initial = h;
-    else if (saved && saved.station && byId[saved.station]) initial = saved.station;
+    if (byId[h]) hashStation = h;
+    hashBare = parts.length <= 1;
     readWhFromHash(new URLSearchParams(parts.slice(1).join('&')));
   } catch (_) { /* ignore */ }
+  const standalone = (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
+  if (hashStation && !(standalone && hashBare && byId[savedStation])) initial = hashStation;
+  else if (byId[savedStation]) initial = savedStation;
   state.stationId = initial;
+  if (initial !== hashStation) { try { updateHash(); } catch (_) { /* ignore */ } }
   writeWhForm();
-  document.querySelectorAll('[data-datum]').forEach((x) => x.setAttribute('aria-checked', String(x.dataset.datum === state.datum)));
-  document.querySelectorAll('[data-range]').forEach((x) => x.setAttribute('aria-checked', String(Number(x.dataset.range) === state.rangeDays)));
+  // Auf dem Smartphone Eingaben einklappen, wenn die Kartenhöhe schon (z. B. per Link) vorgegeben ist
+  if (window.matchMedia('(max-width: 860px)').matches && state.wh.h !== null) setWhCollapsed(true);
   renderList();
   initMap();
   $('pickerCurrent').textContent = byId[initial] ? byId[initial].name : '';
@@ -1089,4 +1000,11 @@
   load();
   setInterval(() => { if (!document.hidden) load(); }, REFRESH_MS);
   setInterval(() => { if (state.data && !state.loading) { renderKpis(); renderWh(); } }, 60 * 1000);
+  window.addEventListener('online', () => load());
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && state.data && Date.now() - (state.lastLoad || 0) > 60 * 1000) load(); });
+
+  // Als App installierbar + offlinefähig (nur über http/https, nicht per Datei)
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  }
 })();

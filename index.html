@@ -2,20 +2,26 @@
 <html lang="de">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Tidenblick Nordsee – Tidenkurven der BSH-Pegel</title>
 <meta name="description" content="Tidenkurven, Hoch- und Niedrigwasser sowie Wasserstandsvorhersagen für Pegel an der deutschen Nordseeküste – auf Basis der offenen BSH-Daten.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%230d5a70%22/%3E%3Cpath d=%22M4 18c3 0 3-5 6-5s3 5 6 5 3-5 6-5 3 5 6 5%22 fill=%22none%22 stroke=%22white%22 stroke-width=%222.6%22 stroke-linecap=%22round%22/%3E%3C/svg%3E">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="icons/icon-180.png">
-<meta name="theme-color" content="#0d5a70" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0a1319" media="(prefers-color-scheme: dark)">
-<link rel="stylesheet" href="fonts.css">
-<link rel="stylesheet" href="vendor/leaflet.css">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="theme-color" content="#fbfaf6">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Tidenblick">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%230d5a70%22/%3E%3Cpath d=%22M4 18c3 0 3-5 6-5s3 5 6 5 3-5 6-5 3 5 6 5%22 fill=%22none%22 stroke=%22white%22 stroke-width=%222.6%22 stroke-linecap=%22round%22/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://api.fontshare.com">
+<link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<noscript><div class="noscript-box">Diese App benötigt JavaScript: Ohne JavaScript können keine Tidenkurven, Wasserstände oder Passierfenster berechnet und angezeigt werden. Bitte aktiviere JavaScript in deinem Browser.</div></noscript>
 <div class="app">
   <header class="topbar">
     <div class="brand">
@@ -46,29 +52,21 @@
       <span class="picker-current" id="pickerCurrent">–</span>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     </button>
-    <div class="picker-body" id="pickerBody">
+    <div class="picker-body" id="pickerBody" data-view="list">
+      <div class="picker-tabs" role="tablist" aria-label="Ansicht der Pegelauswahl">
+        <button type="button" role="tab" data-ptab="list" aria-selected="true">Liste</button>
+        <button type="button" role="tab" data-ptab="map" aria-selected="false">Karte</button>
+      </div>
       <div id="map" class="map" role="region" aria-label="Karte der Pegel"></div>
       <label class="search">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 20l-4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-        <input id="search" type="search" placeholder="Pegel suchen, z. B. Norderney" autocomplete="off" aria-label="Pegel suchen">
+        <input id="search" type="search" placeholder="Pegel suchen" autocomplete="off" aria-label="Pegel suchen">
       </label>
-      <button class="geo-btn" id="nearBtn" type="button" title="Nächstgelegenen Pegel über den Standort ermitteln">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="2.5" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-        Pegel in meiner Nähe
-      </button>
-      <div class="geo-hint" id="geoHint" aria-live="polite"></div>
       <div class="station-list" id="stationList" role="listbox" aria-label="Pegel an der Nordseeküste"></div>
     </div>
   </aside>
 
   <main class="main" id="main">
-    <nav class="quicknav" aria-label="Bereiche">
-      <button type="button" data-target="chartCard">Kurve</button>
-      <button type="button" data-target="eventsCard">Zeiten</button>
-      <button type="button" data-target="whCard">Wattenhoch</button>
-      <button type="button" data-target="sidebar">Pegel</button>
-    </nav>
-
     <section class="station-head">
       <div>
         <div class="eyebrow" id="stArea">–</div>
@@ -89,9 +87,17 @@
       <div class="kpi"><div class="kpi-label">Tidenhub nächste Tide</div><div class="kpi-value skel" id="kpiRange">&nbsp;</div><div class="kpi-sub" id="kpiRangeSub">&nbsp;</div></div>
     </section>
 
-    <section class="card chart-card" id="chartCard">
+    <nav class="jump" id="jump" aria-label="Zu Abschnitt springen">
+      <button type="button" data-jump="secChart">Kurve</button>
+      <button type="button" data-jump="secEvents">Zeiten</button>
+      <button type="button" data-jump="whCard">Wattenhoch</button>
+      <button type="button" data-jump="secInfo">Pegel</button>
+    </nav>
+
+    <section class="card chart-card" id="secChart">
       <div class="card-head">
         <div>
+          <div class="chart-station" id="chartStation"></div>
           <h2>Tidenkurve</h2>
           <div class="card-sub" id="chartSub">Wasserstand in cm über PNP</div>
         </div>
@@ -115,6 +121,7 @@
           <h2 id="whTitle">Wattenhoch-Passage</h2>
           <div class="card-sub">Wann ist genug Wasser über dem Wattenhoch? Berechnet mit dem gewählten Pegel als Bezugspegel.</div>
         </div>
+        <button type="button" class="wh-toggle" id="whToggle" aria-expanded="true" aria-controls="whForm">Eingaben ausblenden</button>
       </div>
       <form class="wh-form" id="whForm" autocomplete="off" novalidate>
         <label class="fld fld-full"><span>Bekanntes Wattfahrwasser (setzt Bezugspegel und Zeitversatz)</span>
@@ -155,7 +162,7 @@
     </section>
 
     <div class="grid-2">
-      <section class="card" id="eventsCard">
+      <section class="card" id="secEvents">
         <div class="card-head"><div><h2>Hoch- und Niedrigwasser</h2><div class="card-sub" id="eventsSub">Astronomische Vorausberechnung und Vorhersage</div></div></div>
         <div class="table-wrap">
           <table class="events" id="events">
@@ -163,9 +170,10 @@
             <tbody></tbody>
           </table>
         </div>
+        <button type="button" class="events-more" id="eventsMore">Alle Tage anzeigen</button>
       </section>
 
-      <div class="stack">
+      <div class="stack" id="secInfo">
         <section class="card">
           <div class="card-head"><div><h2>Sonne &amp; Mond</h2><div class="card-sub">Heute am Pegel</div></div></div>
           <dl class="facts" id="astro"></dl>
@@ -185,10 +193,9 @@
   </main>
 </div>
 
-<script>if ('serviceWorker' in navigator) { window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js'); }); }</script>
-<script src="vendor/d3.min.js"></script>
-<script src="vendor/leaflet.js"></script>
-<script src="vendor/suncalc.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/suncalc@1.9.0/suncalc.js"></script>
 <script src="stations.js"></script>
 <script src="presets.js"></script>
 <script src="app.js"></script>
